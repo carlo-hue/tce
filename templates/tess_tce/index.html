@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AGATA - Ricerca Esopianeti TESS (TCE per settore)</title>
+    <link rel="stylesheet" href="{{ url_for('tess_tce.static', filename='css/common.css') }}">
+    <link rel="stylesheet" href="{{ url_for('tess_tce.static', filename='css/tess_tce.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+</head>
+<body>
+    <script id="tess-tce-bootstrap" type="application/json">{{ {"api_base": api_base, "initial_query": initial_query}|tojson }}</script>
+    <aside class="module-sidebar">
+        <div class="module-sidebar-title">Moduli Principali</div>
+        <nav class="module-nav">
+            <a href="{{ module_links.admin }}" class="module-nav-link"><i class="bi bi-wrench"></i>Admin</a>
+            <a href="{{ module_links.variable_stars }}" class="module-nav-link"><i class="bi bi-graph-up"></i>Editor Stelle</a>
+            <a href="{{ module_links.exoplanets }}" class="module-nav-link"><i class="bi bi-globe"></i>Esopianeti</a>
+            <a href="{{ module_links.field_star_map }}" class="module-nav-link"><i class="bi bi-bullseye"></i>Field Star Map</a>
+            <a href="{{ module_links.galassie_nane }}" class="module-nav-link"><i class="bi bi-stars"></i>Galassie Nane</a>
+            <a href="{{ module_links.tess_tce }}" class="module-nav-link active"><i class="bi bi-search-heart"></i>TESS TCE</a>
+        </nav>
+    </aside>
+
+    <div class="app-shell">
+        <header>
+            <h1>AGATA - Ricerca Esopianeti TESS (TCE per settore)</h1>
+            <nav>
+                <a href="{{ module_links.variable_stars }}">Stelle Variabili</a>
+                <a href="{{ module_links.exoplanets }}">Esopianeti</a>
+                <a href="{{ module_links.field_star_map }}">Field Star Map</a>
+                <a href="{{ module_links.galassie_nane }}">Galassie Nane</a>
+                <a href="{{ module_links.tess_tce }}" class="active">TESS TCE</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="panel">
+                <div class="section-head">
+                    <h2>Configurazione Analisi (FAST endpoint)</h2>
+                    <div class="section-actions">
+                        <button id="runBtn" class="btn-primary" type="button">Run</button>
+                        <button id="clearCacheBtn" class="btn-secondary-link" type="button">Azzera cache</button>
+                        <label class="inline-mini">
+                            Top N DV
+                            <input id="topNInput" type="number" min="1" value="20">
+                        </label>
+                        <button id="fetchTopStatusBtn" class="btn-secondary-link" type="button">Fetch Status Top N</button>
+                        <button id="fetchTopDvBtn" class="btn-secondary-link" type="button">Fetch DV docs Top N</button>
+                    </div>
+                </div>
+                <div class="project-controls">
+                    <label class="project-control-item">
+                        Nome progetto
+                        <input id="projectNameInput" type="text" placeholder="es. settore_21_v1" maxlength="40">
+                    </label>
+                    <button id="saveProjectBtn" class="btn-secondary-link" type="button">Salva progetto</button>
+                    <label class="project-control-item">
+                        Progetti salvati
+                        <select id="projectSelect">
+                            <option value="">-- seleziona --</option>
+                        </select>
+                    </label>
+                    <button id="loadProjectBtn" class="btn-secondary-link" type="button">Ripristina</button>
+                    <button id="deleteProjectBtn" class="btn-secondary-link" type="button">Elimina</button>
+                </div>
+
+                <div class="form-grid">
+                    <label>sector
+                        <input id="sectorInput" type="number" min="1" value="1" required>
+                    </label>
+                    <label>limit
+                        <input id="limitInput" type="number" min="1" max="5000" value="" placeholder="opzionale">
+                    </label>
+                    <label>min_mes
+                        <input id="minMesInput" type="number" step="0.1" value="7.1">
+                    </label>
+                    <label>max_depth_pct
+                        <input id="maxDepthInput" type="number" step="0.001" placeholder="es. 5">
+                    </label>
+                    <label>min_duration_hr
+                        <input id="minDurationInput" type="number" step="0.1" placeholder="es. 1.5">
+                    </label>
+                    <label>max_duration_hr
+                        <input id="maxDurationInput" type="number" step="0.1" placeholder="es. 12">
+                    </label>
+                    <label>sort_by
+                        <select id="sortByInput">
+                            <option value="score" selected>score desc</option>
+                            <option value="mes">MES desc</option>
+                            <option value="depth_pct">depth_pct asc</option>
+                            <option value="period">period asc</option>
+                        </select>
+                    </label>
+                    <label>gaia_radius_arcsec
+                        <input id="gaiaRadiusInput" type="number" min="0.5" max="30" step="0.5" value="5">
+                    </label>
+                    <div class="form-side-panel">
+                        <label class="inline-check">
+                            <input id="useCdppInput" type="checkbox">
+                            <span>Usa CDPP nel ranking</span>
+                        </label>
+                        <label class="inline-check">
+                            <input id="includeDvInput" type="checkbox">
+                            <span>include_dv (lento)</span>
+                        </label>
+                        <label class="inline-check">
+                            <input id="includeStatusInput" type="checkbox">
+                            <span>include_status TAP (lento)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="kpi-grid">
+                    <div class="kpi-card"><div class="kpi-label">Settore</div><div id="kpiSector" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">Risultati</div><div id="kpiCount" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">Ranking</div><div id="kpiRanking" class="kpi-value">base_v1</div></div>
+                    <div class="kpi-card"><div class="kpi-label">API</div><div id="kpiApi" class="kpi-value">-</div></div>
+                </div>
+                <p id="statusLine" class="meta">Pronto.</p>
+                <pre id="errorBox" class="error-box hidden"></pre>
+            </section>
+
+            <section class="panel">
+                <div class="section-head">
+                    <h2>Risultati TCE</h2>
+                    <div class="section-actions">
+                        <span class="meta">Click su una riga per TAP status + DV on-demand</span>
+                    </div>
+                </div>
+                <div class="result-filters">
+                    <span class="meta">Filtro stato analisi:</span>
+                    <label class="inline-check slim">
+                        <input id="filterAllStatesInput" type="checkbox" checked>
+                        <span>Tutti</span>
+                    </label>
+                    <label class="inline-check slim">
+                        <input class="tceStateFilterInput" type="checkbox" value="IN_ANALISI" checked>
+                        <span>In analisi</span>
+                    </label>
+                    <label class="inline-check slim">
+                        <input class="tceStateFilterInput" type="checkbox" value="VALIDO" checked>
+                        <span>Valido</span>
+                    </label>
+                    <label class="inline-check slim">
+                        <input class="tceStateFilterInput" type="checkbox" value="NON_VALIDO" checked>
+                        <span>Non valido</span>
+                    </label>
+                    <span id="filterSummary" class="meta"></span>
+                </div>
+                <div class="table-wrap">
+                    <table class="preview-table" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th>rank</th>
+                                <th>score</th>
+                                <th>tic_id</th>
+                                <th>tce_id</th>
+                                <th>period</th>
+                                <th>duration_hr</th>
+                                <th>depth_pct</th>
+                                <th>mes</th>
+                                <th>status</th>
+                                <th>stato analisi</th>
+                                <th>Docs</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody">
+                            <tr><td colspan="11" class="empty-cell">Nessun dato. Premi Run.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="section-head">
+                    <h2>Dettaglio TIC selezionato</h2>
+                    <div class="section-actions"><span id="selectedTicLabel" class="meta">Nessuna selezione</span></div>
+                </div>
+                <div class="kpi-grid compact">
+                    <div class="kpi-card"><div class="kpi-label">Score</div><div id="detailScore" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">MES norm</div><div id="detailMesNorm" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">Depth score</div><div id="detailDepthScore" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">Duration score</div><div id="detailDurationScore" class="kpi-value">-</div></div>
+                    <div class="kpi-card"><div class="kpi-label">SNR norm</div><div id="detailSnrNorm" class="kpi-value">-</div></div>
+                </div>
+                <div id="dvListWrap" class="dv-list-wrap">
+                    <div class="empty-cell">Nessun TIC selezionato.</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('tess_tce.static', filename='js/tess_tce/main.js') }}"></script>
+</body>
+</html>
