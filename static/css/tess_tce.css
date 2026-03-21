@@ -171,6 +171,10 @@ main {
     padding: 0.55rem 0.1rem 0.75rem;
 }
 
+.filter-group-label {
+    margin-left: 0.55rem;
+}
+
 .inline-check.slim {
     gap: 0.35rem;
     font-size: 0.83rem;
@@ -330,16 +334,19 @@ main {
 .preview-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 1090px;
-    font-size: 0.84rem;
+    table-layout: fixed;
+    font-size: 0.8rem;
 }
 
 .preview-table th,
 .preview-table td {
     border-bottom: 1px solid #e8eef5;
-    padding: 0.55rem 0.5rem;
+    padding: 0.5rem 0.35rem;
     text-align: left;
     vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .preview-table thead th {
@@ -359,6 +366,73 @@ main {
 
 .preview-table tbody tr.selected-row {
     background: #eef7ff;
+}
+
+.preview-table th:nth-child(1),
+.preview-table td[data-col="rank"] {
+    width: 48px;
+}
+
+.preview-table th:nth-child(2),
+.preview-table td[data-col="score"] {
+    width: 70px;
+}
+
+.preview-table th:nth-child(3),
+.preview-table td[data-col="tic_id"] {
+    width: 92px;
+}
+
+.preview-table th:nth-child(4),
+.preview-table td[data-col="tce_id"] {
+    width: 190px;
+}
+
+.preview-table th:nth-child(5),
+.preview-table td[data-col="period"] {
+    width: 74px;
+}
+
+.preview-table th:nth-child(6),
+.preview-table td[data-col="duration_hr"] {
+    width: 88px;
+}
+
+.preview-table th:nth-child(7),
+.preview-table td[data-col="depth_pct"] {
+    width: 84px;
+}
+
+.preview-table th:nth-child(8),
+.preview-table td[data-col="mes"] {
+    width: 72px;
+}
+
+.preview-table th:nth-child(9),
+.preview-table td[data-col="status"] {
+    width: 98px;
+}
+
+.preview-table th:nth-child(10),
+.preview-table td[data-col="user_state"] {
+    width: 136px;
+}
+
+.preview-table th:nth-child(11),
+.preview-table td[data-col="docs"] {
+    width: 86px;
+}
+
+.preview-table th:nth-child(12),
+.preview-table td[data-col="var"] {
+    width: 82px;
+}
+
+.preview-table td[data-col="user_state"] select {
+    width: 100%;
+    max-width: 100%;
+    padding: 0.35rem 1.7rem 0.35rem 0.55rem;
+    font-size: 0.8rem;
 }
 
 .badge {

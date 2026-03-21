@@ -42,9 +42,10 @@
                         <button id="runBtn" class="btn-primary" type="button">Run</button>
                         <button id="clearCacheBtn" class="btn-secondary-link" type="button">Azzera cache</button>
                         <label class="inline-mini">
-                            Top N DV
+                            Top N
                             <input id="topNInput" type="number" min="1" value="20">
                         </label>
+                        <button id="fetchTopVarBtn" class="btn-secondary-link" type="button">Fetch var. Top N</button>
                         <button id="fetchTopStatusBtn" class="btn-secondary-link" type="button">Fetch Status Top N</button>
                         <button id="fetchTopDvBtn" class="btn-secondary-link" type="button">Fetch DV docs Top N</button>
                     </div>
@@ -123,9 +124,9 @@
 
             <section class="panel">
                 <div class="section-head">
-                    <h2>Risultati TCE</h2>
+                    <h2 id="resultsTitle">Risultati TCE</h2>
                     <div class="section-actions">
-                        <span class="meta">Click su una riga per TAP status + DV on-demand</span>
+                        <span class="meta">Click su una riga per selezionarla e usare le azioni Fetch</span>
                     </div>
                 </div>
                 <div class="result-filters">
@@ -146,6 +147,19 @@
                         <input class="tceStateFilterInput" type="checkbox" value="NON_VALIDO" checked>
                         <span>Non valido</span>
                     </label>
+                    <span class="meta filter-group-label">Filtro var.:</span>
+                    <label class="inline-check slim">
+                        <input id="filterAllVariabilityInput" type="checkbox" checked>
+                        <span>Tutte</span>
+                    </label>
+                    <label class="inline-check slim">
+                        <input class="tceVariabilityFilterInput" type="checkbox" value="VARIABLE" checked>
+                        <span>Variabili</span>
+                    </label>
+                    <label class="inline-check slim">
+                        <input class="tceVariabilityFilterInput" type="checkbox" value="NON_VARIABLE" checked>
+                        <span>Non variabili</span>
+                    </label>
                     <span id="filterSummary" class="meta"></span>
                 </div>
                 <div class="table-wrap">
@@ -163,10 +177,11 @@
                                 <th>status</th>
                                 <th>stato analisi</th>
                                 <th>Docs</th>
+                                <th>var.</th>
                             </tr>
                         </thead>
                         <tbody id="resultsBody">
-                            <tr><td colspan="11" class="empty-cell">Nessun dato. Premi Run.</td></tr>
+                            <tr><td colspan="12" class="empty-cell">Nessun dato. Premi Run.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -175,7 +190,11 @@
             <section class="panel">
                 <div class="section-head">
                     <h2>Dettaglio TIC selezionato</h2>
-                    <div class="section-actions"><span id="selectedTicLabel" class="meta">Nessuna selezione</span></div>
+                    <div class="section-actions">
+                        <button id="fetchSelectedVarBtn" class="btn-secondary-link" type="button">Fetch var. riga</button>
+                        <button id="fetchSelectedDvBtn" class="btn-secondary-link" type="button">Fetch DV riga</button>
+                        <span id="selectedTicLabel" class="meta">Nessuna selezione</span>
+                    </div>
                 </div>
                 <div class="kpi-grid compact">
                     <div class="kpi-card"><div class="kpi-label">Score</div><div id="detailScore" class="kpi-value">-</div></div>

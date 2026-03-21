@@ -48,6 +48,7 @@ def _request(
     *,
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
+    raw_body: bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
 ) -> str:
@@ -55,7 +56,7 @@ def _request(
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}{query}"
-    data_bytes = None
+    data_bytes = raw_body
     req_headers = dict(headers or {})
     if json_body is not None:
         data_bytes = json.dumps(json_body).encode("utf-8")
@@ -96,6 +97,22 @@ def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any] | list[Any]:
     for attempt in range(settings.http_retry_attempts + 1):
         try:
             text = _request("POST", url, json_body=payload)
+            return json.loads(text) if text else {}
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt >= settings.http_retry_attempts:
+                break
+            time.sleep(0.25 * (attempt + 1))
+    raise HttpError(str(last_exc) if last_exc else "Unknown HTTP error")
+
+
+def post_form_json(url: str, form_fields: dict[str, Any]) -> dict[str, Any] | list[Any]:
+    last_exc: Exception | None = None
+    encoded = urllib.parse.urlencode({k: v for k, v in form_fields.items() if v is not None}).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    for attempt in range(settings.http_retry_attempts + 1):
+        try:
+            text = _request("POST", url, raw_body=encoded, headers=headers, timeout=settings.http_timeout_seconds)
             return json.loads(text) if text else {}
         except Exception as exc:  # noqa: BLE001
             last_exc = exc

@@ -7,6 +7,7 @@ import logging
 import math
 import re
 import xml.etree.ElementTree as ET
+from pathlib import PurePosixPath
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -414,6 +415,26 @@ def create_blueprint() -> Blueprint:
         _host_or_none, validated = _validate_allowed_external_url(url)
         if _host_or_none is None:
             return validated
+        disposition = str(request.args.get("disposition", "")).strip().lower()
+        if disposition == "inline":
+            try:
+                req = Request(url, headers={"User-Agent": "AGATA-TESS-TCE/1.0"})
+                with urlopen(req, timeout=settings.http_timeout_seconds) as resp:
+                    payload = resp.read()
+                    content_type = resp.headers.get("Content-Type", "application/octet-stream")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Inline download fetch failed: %s", exc)
+                return jsonify({"error": f"Failed to fetch inline document: {exc}"}), 502
+            parsed = urlparse(url)
+            filename = str(request.args.get("filename", "")).strip() or PurePosixPath(parsed.path or "").name or "document"
+            if filename.lower().endswith(".pdf"):
+                content_type = "application/pdf"
+            elif filename.lower().endswith(".xml"):
+                content_type = "application/xml; charset=utf-8"
+            response = Response(payload, content_type=content_type)
+            response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            return response
         return redirect(url, code=307)
 
     @blueprint.get("/api/README")

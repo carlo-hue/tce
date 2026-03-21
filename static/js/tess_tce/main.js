@@ -3,7 +3,10 @@
         runBtn: document.getElementById("runBtn"),
         clearCacheBtn: document.getElementById("clearCacheBtn"),
         fetchTopDvBtn: document.getElementById("fetchTopDvBtn"),
+        fetchTopVarBtn: document.getElementById("fetchTopVarBtn"),
         fetchTopStatusBtn: document.getElementById("fetchTopStatusBtn"),
+        fetchSelectedVarBtn: document.getElementById("fetchSelectedVarBtn"),
+        fetchSelectedDvBtn: document.getElementById("fetchSelectedDvBtn"),
         sectorInput: document.getElementById("sectorInput"),
         limitInput: document.getElementById("limitInput"),
         minMesInput: document.getElementById("minMesInput"),
@@ -19,6 +22,7 @@
         statusLine: document.getElementById("statusLine"),
         errorBox: document.getElementById("errorBox"),
         resultsBody: document.getElementById("resultsBody"),
+        resultsTitle: document.getElementById("resultsTitle"),
         kpiSector: document.getElementById("kpiSector"),
         kpiCount: document.getElementById("kpiCount"),
         kpiRanking: document.getElementById("kpiRanking"),
@@ -32,6 +36,8 @@
         dvListWrap: document.getElementById("dvListWrap"),
         filterAllStatesInput: document.getElementById("filterAllStatesInput"),
         stateFilterInputs: document.querySelectorAll(".tceStateFilterInput"),
+        filterAllVariabilityInput: document.getElementById("filterAllVariabilityInput"),
+        variabilityFilterInputs: document.querySelectorAll(".tceVariabilityFilterInput"),
         filterSummary: document.getElementById("filterSummary"),
         projectNameInput: document.getElementById("projectNameInput"),
         projectSelect: document.getElementById("projectSelect"),
@@ -41,6 +47,7 @@
     };
 
     const USER_TCE_STATES = ["IN_ANALISI", "VALIDO", "NON_VALIDO"];
+    const VARIABILITY_FILTER_VALUES = ["VARIABLE", "NON_VARIABLE"];
     const NOTE_MAX_LEN = 100;
     const PROJECT_INDEX_KEY = "agata_tess_tce_projects_index";
     const USER_TCE_STATE_LABEL = {
@@ -58,6 +65,7 @@
         detailViewer: null,
         expandedDocKindsByTic: {},
         selectedUserStates: new Set(USER_TCE_STATES),
+        selectedVariabilityStates: new Set(VARIABILITY_FILTER_VALUES),
         initialQuery: {},
         initialSelectionApplied: false,
     };
@@ -122,21 +130,26 @@
         return false;
     }
 
-    function storageKeyForTce(tceId) {
-        return `agata_tess_tce_user_state:${String(tceId || "").trim()}`;
+    function normalizeSectorKey(sector) {
+        const raw = String(sector ?? "").trim();
+        return raw || "unknown";
     }
 
-    function storageKeyForTceNote(tceId) {
-        return `agata_tess_tce_note:${String(tceId || "").trim()}`;
+    function storageKeyForTce(sector, tceId) {
+        return `agata_tess_tce_user_state:${normalizeSectorKey(sector)}:${String(tceId || "").trim()}`;
+    }
+
+    function storageKeyForTceNote(sector, tceId) {
+        return `agata_tess_tce_note:${normalizeSectorKey(sector)}:${String(tceId || "").trim()}`;
     }
 
     function storageKeyForProject(name) {
         return `agata_tess_tce_project:${String(name || "").trim().toLowerCase()}`;
     }
 
-    function loadUserTceState(tceId) {
+    function loadUserTceState(sector, tceId) {
         try {
-            const raw = localStorage.getItem(storageKeyForTce(tceId));
+            const raw = localStorage.getItem(storageKeyForTce(sector, tceId));
             if (raw && USER_TCE_STATES.includes(raw)) return raw;
         } catch (_) {
             // ignore storage errors
@@ -144,17 +157,17 @@
         return "IN_ANALISI";
     }
 
-    function saveUserTceState(tceId, value) {
+    function saveUserTceState(sector, tceId, value) {
         try {
-            localStorage.setItem(storageKeyForTce(tceId), value);
+            localStorage.setItem(storageKeyForTce(sector, tceId), value);
         } catch (_) {
             // ignore storage errors
         }
     }
 
-    function loadTceNote(tceId) {
+    function loadTceNote(sector, tceId) {
         try {
-            const raw = localStorage.getItem(storageKeyForTceNote(tceId));
+            const raw = localStorage.getItem(storageKeyForTceNote(sector, tceId));
             if (!raw) return "";
             return String(raw).slice(0, NOTE_MAX_LEN);
         } catch (_) {
@@ -162,10 +175,10 @@
         }
     }
 
-    function saveTceNote(tceId, noteValue) {
+    function saveTceNote(sector, tceId, noteValue) {
         const normalized = String(noteValue || "").slice(0, NOTE_MAX_LEN);
         try {
-            localStorage.setItem(storageKeyForTceNote(tceId), normalized);
+            localStorage.setItem(storageKeyForTceNote(sector, tceId), normalized);
         } catch (_) {
             // ignore storage errors
         }
@@ -191,6 +204,11 @@
         if (ui.kpiSector) ui.kpiSector.textContent = payload && payload.sector != null ? String(payload.sector) : "-";
         if (ui.kpiCount) ui.kpiCount.textContent = payload && payload.count != null ? String(payload.count) : "-";
         if (ui.kpiRanking) ui.kpiRanking.textContent = payload && payload.ranking_version ? payload.ranking_version : "base_v1";
+        if (ui.resultsTitle) {
+            ui.resultsTitle.textContent = payload && payload.sector != null
+                ? `Risultati TCE - Settore ${payload.sector}`
+                : "Risultati TCE";
+        }
     }
 
     function buildFastQuery() {
@@ -376,9 +394,89 @@
         return `<select class="row-user-state-select" data-stop-row="1" data-tce-id="${escapeHtml(String(row.tce_id))}">${options}</select>`;
     }
 
+    function variableKnownFromGaia(row) {
+        return !!(row && row.gaia_lookup && row.gaia_lookup.gaia_variable_known === true);
+    }
+
+    function variableKnownFromVsx(row) {
+        return !!(row && row.vsx_lookup && row.vsx_lookup.vsx_variable_known === true);
+    }
+
+    function gaiaNegativeVariability(row) {
+        return !!(row && row.gaia_lookup && row.gaia_lookup.status === "OK" && row.gaia_lookup.gaia_variable_known === false);
+    }
+
+    function vsxNegativeVariability(row) {
+        return !!(
+            row
+            && row.vsx_lookup
+            && (
+                row.vsx_lookup.status === "NOT_FOUND"
+                || (row.vsx_lookup.status === "OK" && row.vsx_lookup.vsx_variable_known === false)
+            )
+        );
+    }
+
+    function variabilityClass(row) {
+        if (variableKnownFromGaia(row) || variableKnownFromVsx(row)) return "VARIABLE";
+        if (gaiaNegativeVariability(row) && vsxNegativeVariability(row)) return "NON_VARIABLE";
+        return "UNVERIFIED";
+    }
+
+    function variabilityLabel(row) {
+        switch (variabilityClass(row)) {
+            case "VARIABLE":
+                return "var.";
+            case "NON_VARIABLE":
+                return "non var.";
+            default:
+                return "non verif.";
+        }
+    }
+
+    function hasDvLoaded(row) {
+        if (!row) return false;
+        if (Array.isArray(row.dv_products)) return true;
+        return normalizedStatus(row.dv_status, row.dv_available_unknown ? "NOT_REQUESTED" : "UNAVAILABLE") !== "NOT_REQUESTED";
+    }
+
+    function isLookupSettledForRadius(lookup, requestedRadiusArcsec) {
+        if (!lookup) return false;
+        if (!["OK", "NOT_FOUND", "ERROR"].includes(String(lookup.status || ""))) return false;
+        return Number(lookup.search_radius_arcsec) === requestedRadiusArcsec;
+    }
+
+    function needsVariabilityLookup(row) {
+        const requestedRadiusArcsec = currentGaiaRadiusArcsec();
+        return !(
+            isLookupSettledForRadius(row && row.gaia_lookup, requestedRadiusArcsec)
+            && isLookupSettledForRadius(row && row.vsx_lookup, requestedRadiusArcsec)
+        );
+    }
+
+    function topUniqueTicsByPredicate(limit, predicate) {
+        const out = [];
+        const seen = new Set();
+        for (const row of state.items) {
+            const ticId = String(row && row.tic_id || "").trim();
+            if (!ticId || seen.has(ticId)) continue;
+            if (!predicate(row)) continue;
+            seen.add(ticId);
+            out.push(ticId);
+            if (out.length >= limit) break;
+        }
+        return out;
+    }
+
     function filteredItems() {
         if (state.selectedUserStates.size === 0) return [];
-        return state.items.filter((row) => state.selectedUserStates.has(String(row.user_state || "IN_ANALISI")));
+        return state.items.filter((row) => {
+            if (!state.selectedUserStates.has(String(row.user_state || "IN_ANALISI"))) return false;
+            const vClass = variabilityClass(row);
+            if (vClass === "VARIABLE") return state.selectedVariabilityStates.has("VARIABLE");
+            if (vClass === "NON_VARIABLE") return state.selectedVariabilityStates.has("NON_VARIABLE");
+            return true;
+        });
     }
 
     function updateFilterSummary() {
@@ -391,34 +489,36 @@
     function renderRows() {
         if (!ui.resultsBody) return;
         if (!Array.isArray(state.items) || state.items.length === 0) {
-            ui.resultsBody.innerHTML = '<tr><td colspan="11" class="empty-cell">Nessun dato. Premi Run.</td></tr>';
+            ui.resultsBody.innerHTML = '<tr><td colspan="12" class="empty-cell">Nessun dato. Premi Run.</td></tr>';
             updateFilterSummary();
             return;
         }
         const rows = filteredItems();
         if (!rows.length) {
-            ui.resultsBody.innerHTML = '<tr><td colspan="11" class="empty-cell">Nessun TCE con i filtri stato correnti.</td></tr>';
+            ui.resultsBody.innerHTML = '<tr><td colspan="12" class="empty-cell">Nessun TCE con i filtri correnti.</td></tr>';
             updateFilterSummary();
             return;
         }
         ui.resultsBody.innerHTML = rows.map((row) => {
             const docsHtml = dvCellHtml(row);
+            const variabilityHtml = escapeHtml(variabilityLabel(row));
             const isSelected = state.selectedTceId
                 ? state.selectedTceId === row.tce_id
                 : state.selectedTic === row.tic_id;
             const trClass = isSelected ? ' class="selected-row"' : "";
             return `<tr data-tic-id="${row.tic_id}" data-tce-id="${escapeHtml(String(row.tce_id))}"${trClass}>
-                <td>${row.rank ?? "-"}</td>
-                <td>${Number(row.score).toFixed(4)}</td>
-                <td class="mono">${escapeHtml(String(row.tic_id))}</td>
-                <td>${escapeHtml(String(row.tce_id))}</td>
-                <td>${row.period_days == null ? "-" : Number(row.period_days).toFixed(4)}</td>
-                <td>${Number(row.duration_hr).toFixed(2)}</td>
-                <td>${Number(row.depth_pct).toFixed(3)}</td>
-                <td>${Number(row.mes).toFixed(2)}</td>
-                <td><span class="${statusBadgeClass(normalizedStatus(row.status, row.status_available_unknown ? "NOT_REQUESTED" : "UNKNOWN"))}" title="${escapeHtml(row.status_reason || "")}">${escapeHtml(displayStatusLabel(normalizedStatus(row.status, row.status_available_unknown ? "NOT_REQUESTED" : "UNKNOWN")))}</span></td>
-                <td>${userStateSelectHtml(row)}</td>
-                <td>${docsHtml}</td>
+                <td data-col="rank">${row.rank ?? "-"}</td>
+                <td data-col="score">${Number(row.score).toFixed(4)}</td>
+                <td class="mono" data-col="tic_id">${escapeHtml(String(row.tic_id))}</td>
+                <td data-col="tce_id" title="${escapeHtml(String(row.tce_id))}">${escapeHtml(String(row.tce_id))}</td>
+                <td data-col="period">${row.period_days == null ? "-" : Number(row.period_days).toFixed(4)}</td>
+                <td data-col="duration_hr">${Number(row.duration_hr).toFixed(2)}</td>
+                <td data-col="depth_pct">${Number(row.depth_pct).toFixed(3)}</td>
+                <td data-col="mes">${Number(row.mes).toFixed(2)}</td>
+                <td data-col="status"><span class="${statusBadgeClass(normalizedStatus(row.status, row.status_available_unknown ? "NOT_REQUESTED" : "UNKNOWN"))}" title="${escapeHtml(row.status_reason || "")}">${escapeHtml(displayStatusLabel(normalizedStatus(row.status, row.status_available_unknown ? "NOT_REQUESTED" : "UNKNOWN")))}</span></td>
+                <td data-col="user_state">${userStateSelectHtml(row)}</td>
+                <td data-col="docs">${docsHtml}</td>
+                <td data-col="var">${variabilityHtml}</td>
             </tr>`;
         }).join("");
         updateFilterSummary();
@@ -486,7 +586,7 @@
         const products = Array.isArray(row.dv_products) ? row.dv_products : [];
         const dvMeta = dvStatusMeta(row);
         if (row.dv_products == null && normalizedStatus(row.dv_status, "NOT_REQUESTED") === "NOT_REQUESTED") {
-            return '<div class="empty-cell">DV non ancora richiesti. Click sulla riga per fetch on-demand.</div>';
+            return '<div class="empty-cell">DV non ancora richiesti. Usa Fetch DV riga o Fetch DV Top N.</div>';
         }
         if (row.dv_error && (!products.length)) {
             return `<div class="empty-cell">DV ${escapeHtml(dvMeta.label)}: ${escapeHtml(dvErrorSummary(row))}</div>`;
@@ -558,7 +658,7 @@
             <details class="xml-raw-details"><summary>XML raw (formattato)</summary><pre>${escapeHtml(rawXml)}</pre></details>`;
         }
         if (viewer.mode === "pdf") {
-            const pdfSrc = `${apiBase()}/download?url=${encodeURIComponent(viewer.url || "")}#zoom=page-fit`;
+            const pdfSrc = `${apiBase()}/download?url=${encodeURIComponent(viewer.url || "")}&disposition=inline&filename=${encodeURIComponent(viewer.filename || "document.pdf")}#zoom=page-fit`;
             return `<div class="doc-viewer-head">
                 <div><strong>${escapeHtml(viewer.filename || "DVS")}</strong></div>
                 <div class="doc-viewer-actions">
@@ -857,10 +957,6 @@
             ? (state.items.find((x) => x.tce_id === tceId) || state.items.find((x) => x.tic_id === ticId) || null)
             : (state.items.find((x) => x.tic_id === ticId) || null);
         setDetail(row);
-        if (ticId) {
-            void ensureGaiaLookupForTic(ticId);
-            void ensureVsxLookupForTic(ticId);
-        }
     }
 
     async function previewDocumentForTic(ticId, docKey) {
@@ -960,6 +1056,7 @@
                 search_radius_arcsec: requestedRadiusArcsec,
             },
         }));
+        renderRows();
         const rowBefore = currentDetailRow();
         if (rowBefore && rowBefore.tic_id === ticId) setDetail(rowBefore);
         try {
@@ -978,6 +1075,7 @@
                 },
             }));
         }
+        renderRows();
         const rowAfter = currentDetailRow();
         if (rowAfter && rowAfter.tic_id === ticId) setDetail(rowAfter);
     }
@@ -1002,6 +1100,7 @@
                 search_radius_arcsec: requestedRadiusArcsec,
             },
         }));
+        renderRows();
         const rowBefore = currentDetailRow();
         if (rowBefore && rowBefore.tic_id === ticId) setDetail(rowBefore);
         try {
@@ -1020,6 +1119,7 @@
                 },
             }));
         }
+        renderRows();
         const rowAfter = currentDetailRow();
         if (rowAfter && rowAfter.tic_id === ticId) setDetail(rowAfter);
     }
@@ -1035,8 +1135,8 @@
             const payload = await fetchJson(`${apiBase()}/tce?${buildFastQuery().toString()}`);
             state.items = (Array.isArray(payload.items) ? payload.items : []).map((item) => ({
                 ...item,
-                user_state: loadUserTceState(item.tce_id),
-                user_note: loadTceNote(item.tce_id),
+                user_state: loadUserTceState(item.sector, item.tce_id),
+                user_note: loadTceNote(item.sector, item.tce_id),
             }));
             setKpis(payload);
             renderRows();
@@ -1125,20 +1225,32 @@
         }
     }
 
+    async function fetchVariabilityForTic(ticId) {
+        if (!ticId) return;
+        setStatus(`Recupero variabilita' Gaia/VSX per TIC ${ticId}...`);
+        await Promise.all([
+            ensureGaiaLookupForTic(ticId),
+            ensureVsxLookupForTic(ticId),
+        ]);
+        renderRows();
+        if (state.selectedTic === ticId) selectRowByTic(ticId, state.selectedTceId);
+        setStatus(`Variabilita' aggiornata per TIC ${ticId}.`);
+    }
+
     async function fetchStatusTopN() {
         if (state.batchLoading) return;
         const topN = Math.max(1, Number(ui.topNInput.value || 20));
-        const tics = state.items
-            .slice(0, topN)
-            .filter((x) => x.status_available_unknown)
-            .map((x) => x.tic_id);
+        const tics = topUniqueTicsByPredicate(topN, (row) => row.status_available_unknown);
         if (!tics.length) {
             setStatus("Nessun status TAP da aggiornare nei Top N.");
             return;
         }
         state.batchLoading = true;
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = true;
         ui.fetchTopStatusBtn.disabled = true;
         ui.fetchTopDvBtn.disabled = true;
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = true;
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = true;
         if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = true;
         setError(null);
         setStatus(`Recupero status TAP per top ${tics.length} TIC...`);
@@ -1167,8 +1279,52 @@
             setStatus("Errore batch status TAP.");
         } finally {
             state.batchLoading = false;
+            if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = false;
             ui.fetchTopStatusBtn.disabled = false;
             ui.fetchTopDvBtn.disabled = false;
+            if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = false;
+            if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = false;
+            if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = false;
+        }
+    }
+
+    async function fetchVariabilityTopN() {
+        if (state.batchLoading) return;
+        const topN = Math.max(1, Number(ui.topNInput.value || 20));
+        const tics = topUniqueTicsByPredicate(topN, needsVariabilityLookup);
+        if (!tics.length) {
+            setStatus("Nessuna variabilita' da calcolare nei Top N.");
+            return;
+        }
+        state.batchLoading = true;
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = true;
+        ui.fetchTopStatusBtn.disabled = true;
+        ui.fetchTopDvBtn.disabled = true;
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = true;
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = true;
+        if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = true;
+        setError(null);
+        setStatus(`Recupero variabilita' Gaia/VSX per top ${tics.length} TIC...`);
+        try {
+            for (const ticId of tics) {
+                await Promise.all([
+                    ensureGaiaLookupForTic(ticId),
+                    ensureVsxLookupForTic(ticId),
+                ]);
+            }
+            renderRows();
+            if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
+            setStatus(`Variabilita' aggiornata per ${tics.length} TIC.`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+            setStatus("Errore batch variabilita'.");
+        } finally {
+            state.batchLoading = false;
+            if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = false;
+            ui.fetchTopStatusBtn.disabled = false;
+            ui.fetchTopDvBtn.disabled = false;
+            if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = false;
+            if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = false;
             if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = false;
         }
     }
@@ -1176,14 +1332,17 @@
     async function fetchDvTopN() {
         if (state.batchLoading) return;
         const topN = Math.max(1, Number(ui.topNInput.value || 20));
-        const tics = state.items.slice(0, topN).map((x) => x.tic_id);
+        const tics = topUniqueTicsByPredicate(topN, (row) => !hasDvLoaded(row));
         if (!tics.length) {
-            setStatus("Nessun TCE disponibile per batch DV.");
+            setStatus("Nessun DV da recuperare nei Top N.");
             return;
         }
         state.batchLoading = true;
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = true;
         ui.fetchTopStatusBtn.disabled = true;
         ui.fetchTopDvBtn.disabled = true;
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = true;
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = true;
         if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = true;
         setError(null);
         setStatus(`Recupero DV batch per top ${tics.length} TIC...`);
@@ -1214,9 +1373,58 @@
             setStatus("Errore batch DV.");
         } finally {
             state.batchLoading = false;
+            if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = false;
             ui.fetchTopStatusBtn.disabled = false;
             ui.fetchTopDvBtn.disabled = false;
+            if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = false;
+            if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = false;
             if (ui.clearCacheBtn) ui.clearCacheBtn.disabled = false;
+        }
+    }
+
+    async function fetchSelectedVariability() {
+        if (state.loading || state.batchLoading) return;
+        const ticId = state.selectedTic;
+        if (!ticId) {
+            setStatus("Seleziona una riga per calcolare la variabilita'.");
+            return;
+        }
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = true;
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = true;
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = true;
+        ui.fetchTopStatusBtn.disabled = true;
+        ui.fetchTopDvBtn.disabled = true;
+        try {
+            await fetchVariabilityForTic(ticId);
+        } finally {
+            if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = false;
+            if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = false;
+            if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = false;
+            ui.fetchTopStatusBtn.disabled = false;
+            ui.fetchTopDvBtn.disabled = false;
+        }
+    }
+
+    async function fetchSelectedDv() {
+        if (state.loading || state.batchLoading) return;
+        const ticId = state.selectedTic;
+        if (!ticId) {
+            setStatus("Seleziona una riga per recuperare i DV.");
+            return;
+        }
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = true;
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = true;
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = true;
+        ui.fetchTopStatusBtn.disabled = true;
+        ui.fetchTopDvBtn.disabled = true;
+        try {
+            await fetchDvForTic(ticId, state.selectedTceId);
+        } finally {
+            if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.disabled = false;
+            if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.disabled = false;
+            if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.disabled = false;
+            ui.fetchTopStatusBtn.disabled = false;
+            ui.fetchTopDvBtn.disabled = false;
         }
     }
 
@@ -1256,11 +1464,6 @@
         const tceId = rowEl.getAttribute("data-tce-id");
         if (!ticId) return;
         selectRowByTic(ticId, tceId || null);
-        void (async function () {
-            await fetchStatusForTic(ticId);
-            renderRows();
-            await fetchDvForTic(ticId, tceId || null);
-        })();
     }
 
     function handleTableChange(event) {
@@ -1272,8 +1475,11 @@
         const tceId = target.getAttribute("data-tce-id") || "";
         const nextState = String(target.value || "");
         if (!tceId || !USER_TCE_STATES.includes(nextState)) return;
-        saveUserTceState(tceId, nextState);
-        state.items = state.items.map((row) => row.tce_id === tceId ? { ...row, user_state: nextState } : row);
+        state.items = state.items.map((row) => {
+            if (row.tce_id !== tceId) return row;
+            saveUserTceState(row.sector, tceId, nextState);
+            return { ...row, user_state: nextState };
+        });
         renderRows();
     }
 
@@ -1290,6 +1496,19 @@
         renderRows();
     }
 
+    function applyVariabilityFiltersFromUi() {
+        const selected = new Set();
+        ui.variabilityFilterInputs.forEach((el) => {
+            if (el instanceof HTMLInputElement && el.checked && VARIABILITY_FILTER_VALUES.includes(el.value)) {
+                selected.add(el.value);
+            }
+        });
+        state.selectedVariabilityStates = selected;
+        const allSelected = VARIABILITY_FILTER_VALUES.every((s) => selected.has(s));
+        if (ui.filterAllVariabilityInput) ui.filterAllVariabilityInput.checked = allSelected;
+        renderRows();
+    }
+
     function handleStateFilterChange(event) {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) return;
@@ -1303,6 +1522,17 @@
         }
         if (target.classList.contains("tceStateFilterInput")) {
             applyStateFiltersFromUi();
+        }
+        if (target === ui.filterAllVariabilityInput) {
+            const checked = !!target.checked;
+            ui.variabilityFilterInputs.forEach((el) => {
+                if (el instanceof HTMLInputElement) el.checked = checked;
+            });
+            applyVariabilityFiltersFromUi();
+            return;
+        }
+        if (target.classList.contains("tceVariabilityFilterInput")) {
+            applyVariabilityFiltersFromUi();
         }
     }
 
@@ -1371,6 +1601,7 @@
         for (const row of state.items) {
             if (!row || !row.tce_id) continue;
             map[row.tce_id] = {
+                sector: row.sector,
                 user_state: USER_TCE_STATES.includes(row.user_state) ? row.user_state : "IN_ANALISI",
                 user_note: String(row.user_note || "").slice(0, NOTE_MAX_LEN),
             };
@@ -1385,8 +1616,8 @@
             if (!hit) return row;
             const nextState = USER_TCE_STATES.includes(hit.user_state) ? hit.user_state : row.user_state;
             const nextNote = String(hit.user_note || "").slice(0, NOTE_MAX_LEN);
-            saveUserTceState(row.tce_id, nextState);
-            saveTceNote(row.tce_id, nextNote);
+            saveUserTceState(row.sector, row.tce_id, nextState);
+            saveTceNote(row.sector, row.tce_id, nextNote);
             return {
                 ...row,
                 user_state: nextState,
@@ -1409,6 +1640,7 @@
             form: collectFormState(),
             filters: {
                 selected_user_states: Array.from(state.selectedUserStates),
+                selected_variability_states: Array.from(state.selectedVariabilityStates),
             },
             annotations: collectAnnotationMap(),
             selected: {
@@ -1451,11 +1683,19 @@
         const selectedStates = Array.isArray(snapshot.filters && snapshot.filters.selected_user_states)
             ? snapshot.filters.selected_user_states.filter((x) => USER_TCE_STATES.includes(x))
             : USER_TCE_STATES;
+        const selectedVariabilityStates = Array.isArray(snapshot.filters && snapshot.filters.selected_variability_states)
+            ? snapshot.filters.selected_variability_states.filter((x) => VARIABILITY_FILTER_VALUES.includes(x))
+            : VARIABILITY_FILTER_VALUES;
         ui.stateFilterInputs.forEach((el) => {
             if (!(el instanceof HTMLInputElement)) return;
             el.checked = selectedStates.includes(el.value);
         });
+        ui.variabilityFilterInputs.forEach((el) => {
+            if (!(el instanceof HTMLInputElement)) return;
+            el.checked = selectedVariabilityStates.includes(el.value);
+        });
         applyStateFiltersFromUi();
+        applyVariabilityFiltersFromUi();
         await runFast();
         applyAnnotationMap(snapshot.annotations || {});
         renderRows();
@@ -1523,8 +1763,11 @@
             const textarea = Array.from(ui.dvListWrap.querySelectorAll(".tce-note-input"))
                 .find((el) => el.getAttribute("data-note-tce-id") === String(tceId));
             const noteText = textarea instanceof HTMLTextAreaElement ? textarea.value : "";
-            const saved = saveTceNote(tceId, noteText);
-            state.items = state.items.map((row) => row.tce_id === tceId ? { ...row, user_note: saved } : row);
+            state.items = state.items.map((row) => {
+                if (row.tce_id !== tceId) return row;
+                const saved = saveTceNote(row.sector, tceId, noteText);
+                return { ...row, user_note: saved };
+            });
             setStatus(`Nota salvata per TCE ${tceId}.`);
             return;
         }
@@ -1542,7 +1785,10 @@
         if (!tceId) return;
         const normalized = target.value.slice(0, NOTE_MAX_LEN);
         if (normalized !== target.value) target.value = normalized;
-        state.items = state.items.map((row) => row.tce_id === tceId ? { ...row, user_note: normalized } : row);
+        state.items = state.items.map((row) => {
+            if (row.tce_id !== tceId) return row;
+            return { ...row, user_note: normalized };
+        });
         const countEl = target.closest(".tce-note-wrap")?.querySelector(".tce-note-count");
         if (countEl) countEl.textContent = String(normalized.length);
     }
@@ -1550,14 +1796,19 @@
     function bind() {
         if (ui.runBtn) ui.runBtn.addEventListener("click", () => void runFast());
         if (ui.clearCacheBtn) ui.clearCacheBtn.addEventListener("click", () => void clearRemoteCache());
+        if (ui.fetchTopVarBtn) ui.fetchTopVarBtn.addEventListener("click", () => void fetchVariabilityTopN());
         if (ui.fetchTopStatusBtn) ui.fetchTopStatusBtn.addEventListener("click", () => void fetchStatusTopN());
         if (ui.fetchTopDvBtn) ui.fetchTopDvBtn.addEventListener("click", () => void fetchDvTopN());
+        if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.addEventListener("click", () => void fetchSelectedVariability());
+        if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.addEventListener("click", () => void fetchSelectedDv());
         if (ui.resultsBody) ui.resultsBody.addEventListener("click", handleTableClick);
         if (ui.resultsBody) ui.resultsBody.addEventListener("change", handleTableChange);
         if (ui.dvListWrap) ui.dvListWrap.addEventListener("click", handleDetailClick);
         if (ui.dvListWrap) ui.dvListWrap.addEventListener("input", handleDetailInput);
         if (ui.filterAllStatesInput) ui.filterAllStatesInput.addEventListener("change", handleStateFilterChange);
+        if (ui.filterAllVariabilityInput) ui.filterAllVariabilityInput.addEventListener("change", handleStateFilterChange);
         ui.stateFilterInputs.forEach((el) => el.addEventListener("change", handleStateFilterChange));
+        ui.variabilityFilterInputs.forEach((el) => el.addEventListener("change", handleStateFilterChange));
         if (ui.saveProjectBtn) ui.saveProjectBtn.addEventListener("click", () => void saveCurrentProject());
         if (ui.loadProjectBtn) ui.loadProjectBtn.addEventListener("click", () => void loadSelectedProject());
         if (ui.deleteProjectBtn) ui.deleteProjectBtn.addEventListener("click", deleteSelectedProject);
@@ -1576,6 +1827,7 @@
         }
         refreshProjectOptions("");
         applyStateFiltersFromUi();
+        applyVariabilityFiltersFromUi();
         bind();
     }
 

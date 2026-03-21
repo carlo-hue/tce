@@ -4,11 +4,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import quote
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from .config import settings
 from .http_client import HttpError
+from .http_client import post_form_json
 from .models import SQLiteCache
 
 DV_ALLOWED_SUBGROUPS = ("DVR", "DVS", "DVM", "DVT")
@@ -164,17 +163,10 @@ class MastDVClient:
         POST request=<json>.
         """
         url = f"{settings.mast_base_url.rstrip('/')}/api/v0/invoke"
-        data = urlencode({"request": json.dumps(payload)}).encode("utf-8")
-        req = Request(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
         try:
-            with urlopen(req, timeout=settings.http_timeout_seconds) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
+            return post_form_json(url, {"request": json.dumps(payload)})
         except Exception as exc:  # noqa: BLE001
             raise HttpError(str(exc)) from exc
-        try:
-            return json.loads(raw) if raw else {}
-        except Exception as exc:  # noqa: BLE001
-            raise HttpError(f"MAST parse error: {exc}") from exc
 
     @staticmethod
     def _download_url(data_uri: str) -> str:
