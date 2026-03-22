@@ -6,6 +6,7 @@
         fetchTopVarBtn: document.getElementById("fetchTopVarBtn"),
         fetchTopStatusBtn: document.getElementById("fetchTopStatusBtn"),
         fetchSelectedVarBtn: document.getElementById("fetchSelectedVarBtn"),
+        fetchSelectedExtendedVarBtn: document.getElementById("fetchSelectedExtendedVarBtn"),
         fetchSelectedDvBtn: document.getElementById("fetchSelectedDvBtn"),
         sectorInput: document.getElementById("sectorInput"),
         limitInput: document.getElementById("limitInput"),
@@ -84,6 +85,12 @@
 
     function apiBase() {
         return String(bootstrap.api_base || "").trim().replace(/\/+$/, "");
+    }
+
+    function catalogQueryUrl() {
+        const raw = String(bootstrap.catalog_query_url || "").trim();
+        if (!raw || raw === "#") return "/agata/catalog/api/query";
+        return raw;
     }
 
     function normalizedInitialQuery() {
@@ -434,6 +441,83 @@
         }
     }
 
+    function extendedVariabilityClass(row) {
+        const ext = row && row.extended_variability;
+        const status = String(ext && ext.status || "").toUpperCase();
+        if (status === "VARIABLE") return "VARIABLE";
+        if (status === "NO_MATCH") return "NON_VARIABLE";
+        return "UNVERIFIED";
+    }
+
+    function extendedVariabilityLabel(row) {
+        switch (extendedVariabilityClass(row)) {
+            case "VARIABLE":
+                return "var.";
+            case "NON_VARIABLE":
+                return "non var.";
+            default:
+                return "non verif.";
+        }
+    }
+
+    function extendedVariabilityMeta(row) {
+        const ext = row && row.extended_variability;
+        const status = String(ext && ext.status || "NOT_REQUESTED").toUpperCase();
+        switch (status) {
+            case "VARIABLE":
+                return { label: "variabile", className: "badge badge-success" };
+            case "NO_MATCH":
+                return { label: "non variabile", className: "badge" };
+            case "PARTIAL":
+                return { label: "parziale", className: "badge badge-warning" };
+            case "PENDING":
+                return { label: "in corso", className: "badge badge-pending" };
+            case "ERROR":
+                return { label: "errore", className: "badge badge-error" };
+            default:
+                return { label: "non richiesta", className: "badge" };
+        }
+    }
+
+    function summarizeExtendedVariability(payload) {
+        const results = payload && payload.results_by_context && payload.results_by_context.variabilita_nota;
+        const rows = Array.isArray(results) ? results : [];
+        const positives = rows.filter((r) => String(r.status || "").toLowerCase() === "ok" && r.payload && Object.keys(r.payload).length > 0);
+        const negatives = rows.filter((r) => String(r.status || "").toLowerCase() === "no_match");
+        const ambiguous = rows.filter((r) => ["error", "timeout", "ambiguous_match", "multi_match"].includes(String(r.status || "").toLowerCase()));
+        let status = "NO_MATCH";
+        let summary = "Verifica estesa variabilita': non variabile.";
+        if (positives.length > 0) {
+            status = "VARIABLE";
+            summary = `Evidenza di variabilita' trovata in ${positives.length} catalog${positives.length === 1 ? "o" : "hi"}.`;
+        } else if (ambiguous.length > 0 && negatives.length === 0) {
+            status = "ERROR";
+            summary = "La verifica estesa non e' conclusiva per errori o timeout.";
+        } else if (ambiguous.length > 0) {
+            status = "PARTIAL";
+            summary = "Verifica estesa parziale: alcuni cataloghi non hanno risposto o sono ambigui.";
+        }
+        return {
+            status,
+            request_status: String(payload && payload.request_status || "").toLowerCase() || null,
+            request_id: payload && payload.request_id ? String(payload.request_id) : null,
+            gaia_id: payload && payload.resolved_target && payload.resolved_target.gaia_id ? String(payload.resolved_target.gaia_id) : null,
+            gaia_release_used: payload && payload.resolved_target && payload.resolved_target.gaia_release_used
+                ? String(payload.resolved_target.gaia_release_used)
+                : null,
+            summary,
+            catalogs: rows.map((r) => ({
+                catalog_id: String(r.catalog_id || ""),
+                status: String(r.status || ""),
+                matches_count: Number(r.matches_count || 0),
+                from_cache: !!r.from_cache,
+                needs_attention: !!r.needs_attention,
+                error_message: r.error_message ? String(r.error_message) : "",
+                payload: r.payload || {},
+            })),
+        };
+    }
+
     function hasDvLoaded(row) {
         if (!row) return false;
         if (Array.isArray(row.dv_products)) return true;
@@ -489,19 +573,20 @@
     function renderRows() {
         if (!ui.resultsBody) return;
         if (!Array.isArray(state.items) || state.items.length === 0) {
-            ui.resultsBody.innerHTML = '<tr><td colspan="12" class="empty-cell">Nessun dato. Premi Run.</td></tr>';
+            ui.resultsBody.innerHTML = '<tr><td colspan="13" class="empty-cell">Nessun dato. Premi Run.</td></tr>';
             updateFilterSummary();
             return;
         }
         const rows = filteredItems();
         if (!rows.length) {
-            ui.resultsBody.innerHTML = '<tr><td colspan="12" class="empty-cell">Nessun TCE con i filtri correnti.</td></tr>';
+            ui.resultsBody.innerHTML = '<tr><td colspan="13" class="empty-cell">Nessun TCE con i filtri correnti.</td></tr>';
             updateFilterSummary();
             return;
         }
         ui.resultsBody.innerHTML = rows.map((row) => {
             const docsHtml = dvCellHtml(row);
             const variabilityHtml = escapeHtml(variabilityLabel(row));
+            const extendedVariabilityHtml = escapeHtml(extendedVariabilityLabel(row));
             const isSelected = state.selectedTceId
                 ? state.selectedTceId === row.tce_id
                 : state.selectedTic === row.tic_id;
@@ -519,6 +604,7 @@
                 <td data-col="user_state">${userStateSelectHtml(row)}</td>
                 <td data-col="docs">${docsHtml}</td>
                 <td data-col="var">${variabilityHtml}</td>
+                <td data-col="var_ext">${extendedVariabilityHtml}</td>
             </tr>`;
         }).join("");
         updateFilterSummary();
@@ -747,6 +833,14 @@
                 vsxSepDisplay !== "-" ? `sep=${vsxSepDisplay}"` : null,
             ].filter(Boolean).join(" | ")
             : "-";
+        const extVar = row.extended_variability || null;
+        const extMeta = extendedVariabilityMeta(row);
+        const extCatalogs = extVar && Array.isArray(extVar.catalogs) ? extVar.catalogs : [];
+        const extPositiveCatalogs = extCatalogs.filter((entry) => {
+            const status = String(entry && entry.status || "").toLowerCase();
+            const payload = entry && entry.payload && typeof entry.payload === "object" ? entry.payload : {};
+            return status === "ok" && Object.keys(payload).length > 0;
+        });
         const schedaTicHtml = `<section class="detail-card">
                 <h3>Scheda TIC</h3>
                 <div class="tic-info-grid">
@@ -785,6 +879,37 @@
             </div>
         </section>`;
 
+        const extCatalogRows = extPositiveCatalogs.length
+            ? `<div class="ext-var-list">${extPositiveCatalogs.map((entry) => {
+                const payloadKeys = Object.keys(entry.payload || {});
+                const payloadSummary = payloadKeys.length
+                    ? payloadKeys.slice(0, 5).map((key) => `${key}=${entry.payload[key]}`).join(" | ")
+                    : "-";
+                const resultSummary = entry.error_message || payloadSummary || String(entry.status || "-");
+                const statusSuffix = entry.from_cache ? " [cache]" : "";
+                return `<div class="ext-var-row">
+                    <span class="ext-var-catalog" title="${escapeHtml(entry.catalog_id || "-")}">${escapeHtml(entry.catalog_id || "-")}</span>
+                    <span class="ext-var-result" title="${escapeHtml(`${resultSummary}${statusSuffix}`)}">${escapeHtml(resultSummary)}${statusSuffix ? `<span class="ext-var-cache">${escapeHtml(statusSuffix)}</span>` : ""}</span>
+                </div>`;
+            }).join("")}</div>`
+            : (extVar && String(extVar.status || "").toUpperCase() === "NO_MATCH"
+                ? '<div class="empty-cell">Verifica estesa variabilita\': non variabile.</div>'
+                : '<div class="empty-cell">Nessun risultato positivo dalla verifica estesa.</div>');
+
+        let extVarBody = '<div class="empty-cell">Verifica estesa non richiesta.</div>';
+        if (extPositiveCatalogs.length) {
+            extVarBody = extCatalogRows;
+        } else if (extVar && String(extVar.status || "").toUpperCase() === "NO_MATCH") {
+            extVarBody = '<div class="empty-cell">Verifica estesa variabilita\': non variabile.</div>';
+        } else if (extVar && String(extVar.status || "").toUpperCase() !== "NOT_REQUESTED") {
+            extVarBody = `<div class="empty-cell">${escapeHtml(extVar.summary || "Verifica estesa non disponibile.")}</div>`;
+        }
+
+        const extVarHtml = `<section class="detail-card">
+            <h3>Variabilita' estesa</h3>
+            ${extVarBody}
+        </section>`;
+
         const xmlInfoHtml = `<section class="detail-card">
                 <h3>Info rilevanti da XML (istanza selezionata)</h3>
                 ${renderXmlSummaryCard(xmlSummaryItems)}
@@ -800,7 +925,7 @@
             ${renderViewer(row)}
         </section>`;
 
-        ui.dvListWrap.innerHTML = `<div class="detail-layout">${schedaTicHtml}${xmlInfoHtml}${noteHtml}${viewerHtml}${docsHtml}</div>`;
+        ui.dvListWrap.innerHTML = `<div class="detail-layout">${schedaTicHtml}${extVarHtml}${xmlInfoHtml}${noteHtml}${viewerHtml}${docsHtml}</div>`;
     }
 
     function prettyPrintXml(xml) {
@@ -1428,6 +1553,73 @@
         }
     }
 
+    async function fetchSelectedExtendedVariability() {
+        if (state.loading || state.batchLoading) return;
+        const row = currentDetailRow();
+        if (!row) {
+            setStatus("Seleziona una riga per la verifica estesa.");
+            return;
+        }
+        const endpoint = catalogQueryUrl();
+        if (!endpoint) {
+            setStatus("Endpoint catalog non disponibile in questa app.");
+            return;
+        }
+        const gaiaId = row.gaia_lookup && row.gaia_lookup.source_id ? String(row.gaia_lookup.source_id) : "";
+        if (!gaiaId) {
+            setStatus("Esegui prima Fetch var. riga per ottenere il Gaia source_id.");
+            return;
+        }
+        if (ui.fetchSelectedExtendedVarBtn) ui.fetchSelectedExtendedVarBtn.disabled = true;
+        updateRowsForTic(row.tic_id, (item) => ({
+            ...item,
+            extended_variability: {
+                ...(item.extended_variability || {}),
+                status: "PENDING",
+                summary: "Interrogazione variabilita' estesa in corso...",
+                gaia_id: gaiaId,
+            },
+        }));
+        renderRows();
+        if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
+        setStatus(`Recupero variabilita' estesa per TIC ${row.tic_id}...`);
+        try {
+            const payload = await fetchJson(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    gaia_id: gaiaId,
+                    context: "variabilita_nota",
+                    cone_radius: currentGaiaRadiusArcsec(),
+                }),
+            });
+            const summary = summarizeExtendedVariability(payload);
+            updateRowsForTic(row.tic_id, (item) => ({ ...item, extended_variability: summary }));
+            renderRows();
+            if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
+            setStatus(`Variabilita' estesa aggiornata per TIC ${row.tic_id}.`);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            updateRowsForTic(row.tic_id, (item) => ({
+                ...item,
+                extended_variability: {
+                    status: "ERROR",
+                    summary: message,
+                    gaia_id: gaiaId,
+                    catalogs: [],
+                    request_status: null,
+                    request_id: null,
+                    gaia_release_used: null,
+                },
+            }));
+            renderRows();
+            if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
+            setStatus(`Errore verifica estesa variabilita': ${message}`);
+        } finally {
+            if (ui.fetchSelectedExtendedVarBtn) ui.fetchSelectedExtendedVarBtn.disabled = false;
+        }
+    }
+
     async function clearRemoteCache() {
         if (state.loading || state.batchLoading) return;
         const confirmed = window.confirm("Azzerare la cache remota del modulo TESS TCE per DV, status e Gaia?");
@@ -1800,6 +1992,7 @@
         if (ui.fetchTopStatusBtn) ui.fetchTopStatusBtn.addEventListener("click", () => void fetchStatusTopN());
         if (ui.fetchTopDvBtn) ui.fetchTopDvBtn.addEventListener("click", () => void fetchDvTopN());
         if (ui.fetchSelectedVarBtn) ui.fetchSelectedVarBtn.addEventListener("click", () => void fetchSelectedVariability());
+        if (ui.fetchSelectedExtendedVarBtn) ui.fetchSelectedExtendedVarBtn.addEventListener("click", () => void fetchSelectedExtendedVariability());
         if (ui.fetchSelectedDvBtn) ui.fetchSelectedDvBtn.addEventListener("click", () => void fetchSelectedDv());
         if (ui.resultsBody) ui.resultsBody.addEventListener("click", handleTableClick);
         if (ui.resultsBody) ui.resultsBody.addEventListener("change", handleTableChange);

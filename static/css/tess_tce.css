@@ -420,12 +420,17 @@ main {
 
 .preview-table th:nth-child(11),
 .preview-table td[data-col="docs"] {
-    width: 86px;
+    width: 78px;
 }
 
 .preview-table th:nth-child(12),
 .preview-table td[data-col="var"] {
-    width: 82px;
+    width: 74px;
+}
+
+.preview-table th:nth-child(13),
+.preview-table td[data-col="var_ext"] {
+    width: 86px;
 }
 
 .preview-table td[data-col="user_state"] select {
@@ -618,6 +623,45 @@ main {
 
 .tic-info-grid .v {
     font-weight: 600;
+}
+
+.ext-var-list {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.ext-var-row {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.42rem 0.55rem;
+    border: 1px solid #edf2f8;
+    border-radius: 8px;
+    background: #fbfdff;
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+.ext-var-catalog,
+.ext-var-result {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ext-var-catalog {
+    color: var(--tt-muted);
+    text-transform: uppercase;
+}
+
+.ext-var-result {
+    font-weight: 600;
+}
+
+.ext-var-cache {
+    color: var(--tt-muted);
+    font-weight: 500;
 }
 
 table.kv.compact-kv {

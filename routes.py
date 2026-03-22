@@ -91,6 +91,7 @@ def create_blueprint() -> Blueprint:
         return render_template(
             "tess_tce/index.html",
             api_base=url_for("tess_tce.index").rstrip("/") + "/api",
+            catalog_query_url=_optional_url("catalog.api_query_catalogs"),
             initial_query=initial_query,
             module_links={
                 "admin": _optional_url("admin.list_projects"),

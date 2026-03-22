@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
 </head>
 <body>
-    <script id="tess-tce-bootstrap" type="application/json">{{ {"api_base": api_base, "initial_query": initial_query}|tojson }}</script>
+    <script id="tess-tce-bootstrap" type="application/json">{{ {"api_base": api_base, "catalog_query_url": catalog_query_url, "initial_query": initial_query}|tojson }}</script>
     <aside class="module-sidebar">
         <div class="module-sidebar-title">Moduli Principali</div>
         <nav class="module-nav">
@@ -178,10 +178,11 @@
                                 <th>stato analisi</th>
                                 <th>Docs</th>
                                 <th>var.</th>
+                                <th>var.est.</th>
                             </tr>
                         </thead>
                         <tbody id="resultsBody">
-                            <tr><td colspan="12" class="empty-cell">Nessun dato. Premi Run.</td></tr>
+                            <tr><td colspan="13" class="empty-cell">Nessun dato. Premi Run.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -192,6 +193,7 @@
                     <h2>Dettaglio TIC selezionato</h2>
                     <div class="section-actions">
                         <button id="fetchSelectedVarBtn" class="btn-secondary-link" type="button">Fetch var. riga</button>
+                        <button id="fetchSelectedExtendedVarBtn" class="btn-secondary-link" type="button">Fetch var. estesa riga</button>
                         <button id="fetchSelectedDvBtn" class="btn-secondary-link" type="button">Fetch DV riga</button>
                         <span id="selectedTicLabel" class="meta">Nessuna selezione</span>
                     </div>
