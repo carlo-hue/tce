@@ -150,6 +150,10 @@
         return `agata_tess_tce_note:${normalizeSectorKey(sector)}:${String(tceId || "").trim()}`;
     }
 
+    function storageKeyForTicVariability(sector, ticId) {
+        return `agata_tess_tce_variability:${normalizeSectorKey(sector)}:${String(ticId || "").trim()}`;
+    }
+
     function storageKeyForProject(name) {
         return `agata_tess_tce_project:${String(name || "").trim().toLowerCase()}`;
     }
@@ -192,6 +196,83 @@
         return normalized;
     }
 
+    function sanitizeLookupForStorage(lookup) {
+        if (!lookup || typeof lookup !== "object") return null;
+        return JSON.parse(JSON.stringify(lookup));
+    }
+
+    function sanitizeExtendedVariabilityForStorage(value) {
+        if (!value || typeof value !== "object") return null;
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function saveTicVariability(sector, ticId, data) {
+        if (!ticId) return;
+        const payload = {
+            gaia_lookup: sanitizeLookupForStorage(data && data.gaia_lookup),
+            vsx_lookup: sanitizeLookupForStorage(data && data.vsx_lookup),
+            extended_variability: sanitizeExtendedVariabilityForStorage(data && data.extended_variability),
+        };
+        try {
+            localStorage.setItem(storageKeyForTicVariability(sector, ticId), JSON.stringify(payload));
+        } catch (_) {
+            // ignore storage errors
+        }
+    }
+
+    function loadTicVariability(sector, ticId) {
+        try {
+            const raw = localStorage.getItem(storageKeyForTicVariability(sector, ticId));
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function variabilityMatchesRadius(lookup, requestedRadiusArcsec) {
+        if (!lookup || typeof lookup !== "object") return false;
+        const status = String(lookup.status || "").toUpperCase();
+        if (!status || status === "PENDING") return false;
+        const radius = Number(lookup.search_radius_arcsec);
+        return Number.isFinite(radius) && radius === requestedRadiusArcsec;
+    }
+
+    function extendedVariabilityMatchesRadius(value, requestedRadiusArcsec) {
+        if (!value || typeof value !== "object") return false;
+        const status = String(value.status || "").toUpperCase();
+        if (!status || status === "PENDING") return false;
+        const radius = Number(value.query_radius_arcsec);
+        if (!Number.isFinite(radius)) return true;
+        return radius === requestedRadiusArcsec;
+    }
+
+    function applyStoredVariability(row, requestedRadiusArcsec) {
+        const stored = loadTicVariability(row && row.sector, row && row.tic_id);
+        if (!stored) return row;
+        const next = { ...row };
+        if (variabilityMatchesRadius(stored.gaia_lookup, requestedRadiusArcsec)) {
+            next.gaia_lookup = stored.gaia_lookup;
+        }
+        if (variabilityMatchesRadius(stored.vsx_lookup, requestedRadiusArcsec)) {
+            next.vsx_lookup = stored.vsx_lookup;
+        }
+        if (extendedVariabilityMatchesRadius(stored.extended_variability, requestedRadiusArcsec)) {
+            next.extended_variability = stored.extended_variability;
+        }
+        return next;
+    }
+
+    function persistVariabilityForRow(row) {
+        if (!row || !row.tic_id) return;
+        saveTicVariability(row.sector, row.tic_id, {
+            gaia_lookup: row.gaia_lookup || null,
+            vsx_lookup: row.vsx_lookup || null,
+            extended_variability: row.extended_variability || null,
+        });
+    }
+
     function setStatus(text) {
         if (ui.statusLine) ui.statusLine.textContent = text || "";
     }
@@ -211,10 +292,17 @@
         if (ui.kpiSector) ui.kpiSector.textContent = payload && payload.sector != null ? String(payload.sector) : "-";
         if (ui.kpiCount) ui.kpiCount.textContent = payload && payload.count != null ? String(payload.count) : "-";
         if (ui.kpiRanking) ui.kpiRanking.textContent = payload && payload.ranking_version ? payload.ranking_version : "base_v1";
+        if (ui.kpiApi) ui.kpiApi.textContent = apiBase() || "-";
         if (ui.resultsTitle) {
-            ui.resultsTitle.textContent = payload && payload.sector != null
-                ? `Risultati TCE - Settore ${payload.sector}`
-                : "Risultati TCE";
+            if (payload && payload.sector != null) {
+                const parts = [`Risultati TCE - Settore ${payload.sector}`];
+                if (payload.count != null) parts.push(`${payload.count} risultati`);
+                parts.push(`ranking ${payload && payload.ranking_version ? payload.ranking_version : "base_v1"}`);
+                if (apiBase()) parts.push(`API ${apiBase()}`);
+                ui.resultsTitle.textContent = parts.join(" | ");
+            } else {
+                ui.resultsTitle.textContent = "Risultati TCE";
+            }
         }
     }
 
@@ -1188,17 +1276,25 @@
             const payload = await fetchJson(
                 `${apiBase()}/gaia-lookup?tic_id=${encodeURIComponent(String(ticId))}&radius_arcsec=${encodeURIComponent(String(requestedRadiusArcsec))}`
             );
-            updateRowsForTic(ticId, (item) => ({ ...item, gaia_lookup: payload || { status: "UNKNOWN" } }));
+            updateRowsForTic(ticId, (item) => {
+                const next = { ...item, gaia_lookup: payload || { status: "UNKNOWN" } };
+                persistVariabilityForRow(next);
+                return next;
+            });
         } catch (err) {
-            updateRowsForTic(ticId, (item) => ({
-                ...item,
-                gaia_lookup: {
+            updateRowsForTic(ticId, (item) => {
+                const next = {
+                    ...item,
+                    gaia_lookup: {
                     status: "ERROR",
                     reason: err instanceof Error ? err.message : String(err),
                     tic_id: ticId,
                     search_radius_arcsec: requestedRadiusArcsec,
-                },
-            }));
+                    },
+                };
+                persistVariabilityForRow(next);
+                return next;
+            });
         }
         renderRows();
         const rowAfter = currentDetailRow();
@@ -1232,17 +1328,25 @@
             const payload = await fetchJson(
                 `${apiBase()}/vsx-lookup?tic_id=${encodeURIComponent(String(ticId))}&radius_arcsec=${encodeURIComponent(String(requestedRadiusArcsec))}`
             );
-            updateRowsForTic(ticId, (item) => ({ ...item, vsx_lookup: payload || { status: "UNKNOWN" } }));
+            updateRowsForTic(ticId, (item) => {
+                const next = { ...item, vsx_lookup: payload || { status: "UNKNOWN" } };
+                persistVariabilityForRow(next);
+                return next;
+            });
         } catch (err) {
-            updateRowsForTic(ticId, (item) => ({
-                ...item,
-                vsx_lookup: {
+            updateRowsForTic(ticId, (item) => {
+                const next = {
+                    ...item,
+                    vsx_lookup: {
                     status: "ERROR",
                     reason: err instanceof Error ? err.message : String(err),
                     tic_id: ticId,
                     search_radius_arcsec: requestedRadiusArcsec,
-                },
-            }));
+                    },
+                };
+                persistVariabilityForRow(next);
+                return next;
+            });
         }
         renderRows();
         const rowAfter = currentDetailRow();
@@ -1258,10 +1362,13 @@
         setStatus("Caricamento TCE FAST in corso...");
         try {
             const payload = await fetchJson(`${apiBase()}/tce?${buildFastQuery().toString()}`);
+            const requestedRadiusArcsec = currentGaiaRadiusArcsec();
             state.items = (Array.isArray(payload.items) ? payload.items : []).map((item) => ({
-                ...item,
+                ...applyStoredVariability({
+                    ...item,
                 user_state: loadUserTceState(item.sector, item.tce_id),
                 user_note: loadTceNote(item.sector, item.tce_id),
+                }, requestedRadiusArcsec),
             }));
             setKpis(payload);
             renderRows();
@@ -1593,16 +1700,24 @@
                     cone_radius: currentGaiaRadiusArcsec(),
                 }),
             });
-            const summary = summarizeExtendedVariability(payload);
-            updateRowsForTic(row.tic_id, (item) => ({ ...item, extended_variability: summary }));
+            const summary = {
+                ...summarizeExtendedVariability(payload),
+                query_radius_arcsec: currentGaiaRadiusArcsec(),
+            };
+            updateRowsForTic(row.tic_id, (item) => {
+                const next = { ...item, extended_variability: summary };
+                persistVariabilityForRow(next);
+                return next;
+            });
             renderRows();
             if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
             setStatus(`Variabilita' estesa aggiornata per TIC ${row.tic_id}.`);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            updateRowsForTic(row.tic_id, (item) => ({
-                ...item,
-                extended_variability: {
+            updateRowsForTic(row.tic_id, (item) => {
+                const next = {
+                    ...item,
+                    extended_variability: {
                     status: "ERROR",
                     summary: message,
                     gaia_id: gaiaId,
@@ -1610,8 +1725,12 @@
                     request_status: null,
                     request_id: null,
                     gaia_release_used: null,
-                },
-            }));
+                        query_radius_arcsec: currentGaiaRadiusArcsec(),
+                    },
+                };
+                persistVariabilityForRow(next);
+                return next;
+            });
             renderRows();
             if (state.selectedTic) selectRowByTic(state.selectedTic, state.selectedTceId);
             setStatus(`Errore verifica estesa variabilita': ${message}`);
@@ -1801,6 +1920,20 @@
         return map;
     }
 
+    function collectVariabilityMap() {
+        const map = {};
+        for (const row of state.items) {
+            if (!row || !row.tic_id) continue;
+            map[row.tic_id] = {
+                sector: row.sector,
+                gaia_lookup: sanitizeLookupForStorage(row.gaia_lookup),
+                vsx_lookup: sanitizeLookupForStorage(row.vsx_lookup),
+                extended_variability: sanitizeExtendedVariabilityForStorage(row.extended_variability),
+            };
+        }
+        return map;
+    }
+
     function applyAnnotationMap(map) {
         if (!map || typeof map !== "object") return;
         state.items = state.items.map((row) => {
@@ -1815,6 +1948,27 @@
                 user_state: nextState,
                 user_note: nextNote,
             };
+        });
+    }
+
+    function applyVariabilityMap(map) {
+        if (!map || typeof map !== "object") return;
+        const requestedRadiusArcsec = currentGaiaRadiusArcsec();
+        state.items = state.items.map((row) => {
+            const hit = map[row.tic_id];
+            if (!hit) return row;
+            const next = { ...row };
+            if (variabilityMatchesRadius(hit.gaia_lookup, requestedRadiusArcsec)) {
+                next.gaia_lookup = sanitizeLookupForStorage(hit.gaia_lookup);
+            }
+            if (variabilityMatchesRadius(hit.vsx_lookup, requestedRadiusArcsec)) {
+                next.vsx_lookup = sanitizeLookupForStorage(hit.vsx_lookup);
+            }
+            if (extendedVariabilityMatchesRadius(hit.extended_variability, requestedRadiusArcsec)) {
+                next.extended_variability = sanitizeExtendedVariabilityForStorage(hit.extended_variability);
+            }
+            persistVariabilityForRow(next);
+            return next;
         });
     }
 
@@ -1835,6 +1989,7 @@
                 selected_variability_states: Array.from(state.selectedVariabilityStates),
             },
             annotations: collectAnnotationMap(),
+            variability: collectVariabilityMap(),
             selected: {
                 tic_id: state.selectedTic,
                 tce_id: state.selectedTceId,
@@ -1890,6 +2045,7 @@
         applyVariabilityFiltersFromUi();
         await runFast();
         applyAnnotationMap(snapshot.annotations || {});
+        applyVariabilityMap(snapshot.variability || {});
         renderRows();
         const selected = snapshot.selected || {};
         selectRowByTic(selected.tic_id || null, selected.tce_id || null);
